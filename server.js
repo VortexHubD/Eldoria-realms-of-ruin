@@ -318,6 +318,7 @@ function handleAttackPlayer(client, payload) {
     type: "PVP_HIT",
     payload: { attackerId: attacker.id, targetId: target.id, damage: dmg, hp: target.hp, maxHp: target.maxHp }
   }, attacker);
+  send(targetClient, { type: "STATE_CORRECTION", payload: publicState(target) });
   if (target.hp <= 0) {
     target.hp = target.maxHp;
     target.regionId = "region_village";

@@ -19375,7 +19375,7 @@ class yT {
             r.fillStyle = c.color || "#3b82f6", r.beginPath(), r.arc(c.x, c.y, 17, 0, Math.PI * 2), r.fill(), r.fillStyle = "#fed7aa", r.beginPath(), r.arc(c.x, c.y - 5, 10, 0, Math.PI * 2), r.fill(), c.isAttacking && (r.strokeStyle = "#f59e0b", r.lineWidth = 3, r.beginPath(), r.arc(c.x, c.y, 28, 0, Math.PI), r.stroke()), r.fillStyle = "#ffffff", r.font = "bold 11px sans-serif", r.textAlign = "center", r.fillText(`[Nv. ${c.level}] ${c.name}`, c.x, c.y - 26);
             const g = 34,
                 T = 4;
-            if (r.fillStyle = "#334155", r.fillRect(c.x - g / 2, c.y - 20, g, T), r.fillStyle = "#22c55e", r.fillRect(c.x - g / 2, c.y - 20, g * (c.hp / c.maxHp), T), c.chatBubble) {
+            if (r.fillStyle = "#334155", r.fillRect(c.x - g / 2, c.y - 20, g, T), r.fillStyle = "#22c55e", r.fillRect(c.x - g / 2, c.y - 20, g * Math.max(0, Math.min(1, (c.hp || 0) / Math.max(1, c.maxHp || 1))), T), c.chatBubble) {
                 r.fillStyle = "rgba(15, 23, 42, 0.85)", r.strokeStyle = "#94a3b8";
                 const m = r.measureText(c.chatBubble.text).width + 16;
                 r.fillRect(c.x - m / 2, c.y - 55, m, 22), r.strokeRect(c.x - m / 2, c.y - 55, m, 22), r.fillStyle = "#ffffff", r.font = "11px sans-serif", r.fillText(c.chatBubble.text, c.x, c.y - 40)
@@ -19405,7 +19405,7 @@ class yT {
             c.direction === "right" ? _ = -Math.PI * .4 : c.direction === "left" ? _ = Math.PI * .6 : c.direction === "up" ? _ = -Math.PI * .9 : _ = Math.PI * .1, r.arc(c.x, c.y, 36, _, _ + Math.PI * .7), r.stroke()
         }
         r.fillStyle = "#ffffff", r.font = "bold 12px sans-serif", r.textAlign = "center", r.fillText(`[Nv. ${c.level}] ${c.name}`, c.x, c.y - 28);
-        const T = Math.max(1, this.getDerived().maxHp),
+        const T = Math.max(1, c.maxHp || this.getDerived().maxHp),
             m = 40,
             S = 5;
         r.fillStyle = "#1e293b", r.fillRect(c.x - m / 2, c.y - 22, m, S), r.fillStyle = "#22c55e", r.fillRect(c.x - m / 2, c.y - 22, m * Math.max(0, Math.min(1, c.hp / T)), S)
@@ -19596,7 +19596,19 @@ class vT {
         if (r.type === "WELCOME") {
             const c = r.payload || {};
             this.remotePlayers.clear(), (c.players || []).forEach(g => this.upsertRemote(g)), this.onAuthority && c.you && this.onAuthority(c.you, c.saved || null)
-        } else if (r.type === "PLAYER_STATE" || r.type === "PLAYER_JOIN") this.upsertRemote(r.payload);
+        } else if (r.type === "PLAYER_STATE" || r.type === "PLAYER_JOIN") {
+            const c = r.payload;
+            if (c && c.id && c.id === this.localPlayerId) this.onAuthority && this.onAuthority({
+                id: c.id,
+                hp: c.hp,
+                maxHp: c.maxHp,
+                x: c.x,
+                y: c.y,
+                regionId: c.regionId,
+                dungeonId: c.dungeonId
+            }, null);
+            else this.upsertRemote(c)
+        }
         else if (r.type === "PLAYER_LEAVE") r.payload && r.payload.id && this.remotePlayers.delete(r.payload.id), this.notifyPlayerUpdate();
         else if (r.type === "CHAT_MESSAGE") this.triggerChat(r.payload);
         else if (r.type === "STATE_CORRECTION") this.onAuthority && r.payload && this.onAuthority(r.payload, null);
@@ -19607,13 +19619,24 @@ class vT {
             channel: "system",
             timestamp: Date.now()
         });
-        else if (r.type === "PVP_HIT") this.triggerChat({
-            id: "sys_pvp_" + Date.now(),
-            sender: "Combate",
-            text: "Golpe PvP: " + (r.payload && r.payload.damage) + " de daño.",
-            channel: "system",
-            timestamp: Date.now()
-        });
+        else if (r.type === "PVP_HIT") {
+            const hit = r.payload || {};
+            if (hit.targetId === this.localPlayerId) this.onAuthority && this.onAuthority({
+                hp: hit.hp,
+                maxHp: hit.maxHp
+            }, null);
+            else if (hit.targetId) {
+                const rp = this.remotePlayers.get(hit.targetId);
+                rp && (rp.hp = hit.hp, rp.maxHp = hit.maxHp || rp.maxHp, this.remotePlayers.set(hit.targetId, rp), this.notifyPlayerUpdate())
+            }
+            this.triggerChat({
+                id: "sys_pvp_" + Date.now(),
+                sender: "Combate",
+                text: "Golpe PvP: " + (hit.damage) + " de daño.",
+                channel: "system",
+                timestamp: Date.now()
+            })
+        }
         else if (r.type === "PONG") {
             const sent = r.payload && r.payload.clientTime;
             sent && (this.rtt = Math.max(0, Date.now() - sent))
@@ -20705,8 +20728,8 @@ const FT = [
         soundEnabled: E,
         onToggleSound: w
     }) => {
-        const G = Math.max(0, Math.min(100, O.hp / r.maxHp * 100)),
-            oe = Math.max(0, Math.min(100, O.mana / r.maxMana * 100)),
+        const G = Math.max(0, Math.min(100, O.hp / Math.max(1, O.maxHp || r.maxHp) * 100)),
+            oe = Math.max(0, Math.min(100, O.mana / Math.max(1, O.maxMana || r.maxMana) * 100)),
             me = Math.max(0, Math.min(100, O.exp / O.expToNextLevel * 100));
         return f.jsxDEV("div", {
             id: "game-hud-overlay",
@@ -20772,7 +20795,7 @@ const FT = [
                                 columnNumber: 15
                             }, void 0), f.jsxDEV("span", {
                                 className: "absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white drop-shadow",
-                                children: [Math.floor(O.hp), " / ", r.maxHp, " HP"]
+                                children: [Math.floor(O.hp), " / ", Math.floor(O.maxHp || r.maxHp), " HP"]
                             }, void 0, !0, {
                                 fileName: "/app/applet/src/components/HUD.tsx",
                                 lineNumber: 81,
@@ -23604,6 +23627,16 @@ function uD() {
             }
             you.hp != null && (pl.hp = you.hp);
             you.maxHp != null && (pl.maxHp = you.maxHp);
+            g(ie => {
+                if (!ie) return ie;
+                const nh = you.hp != null ? you.hp : pl.hp;
+                const nm = you.maxHp != null ? you.maxHp : (pl.maxHp != null ? pl.maxHp : ie.maxHp);
+                if (ie.hp === nh && ie.maxHp === nm) return ie;
+                return Object.assign({}, ie, {
+                    hp: nh,
+                    maxHp: nm
+                })
+            })
         };
         const ie = () => {
             O.current && r.current && r.current.resize(window.innerWidth, window.innerHeight)
@@ -23618,7 +23651,17 @@ function uD() {
                     const J = r.current.player;
                     bu.broadcastPlayerState(J);
                     const fe = bu.update(.05, J.activeRegionId, J.activeDungeonId);
-                    r.current.remotePlayers = fe
+                    r.current.remotePlayers = fe;
+                    g(ie => {
+                        if (!ie || !J) return ie;
+                        if (ie.hp === J.hp && ie.maxHp === J.maxHp && ie.mana === J.mana && ie.maxMana === J.maxMana) return ie;
+                        return Object.assign({}, ie, {
+                            hp: J.hp,
+                            maxHp: J.maxHp,
+                            mana: J.mana,
+                            maxMana: J.maxMana
+                        })
+                    })
                 }
             }, 50),
             Je = setInterval(() => {

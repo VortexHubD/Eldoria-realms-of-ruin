@@ -18745,13 +18745,13 @@ class yT {
                     chests: (r.chests || []).map(g => Object.assign({}, g, {
                         opened: c.indexOf(g.id) !== -1
                     }))
-                }), this.spawnDungeonEnemies(this.activeDungeon)
+                }), bu.connected ? (this.enemies = this._serverEnemies || []) : this.spawnDungeonEnemies(this.activeDungeon)
             } else this.activeDungeon = null
         } else this.activeDungeon = null, Object.values(mT).forEach(r => {
             r.regionId === this.activeRegion.id && this.npcs.push({
                 ...r
             })
-        }), this.spawnRegionEnemies()
+        }), bu.connected ? (this.enemies = this._serverEnemies || []) : this.spawnRegionEnemies()
     }
     spawnRegionEnemies() {
         const r = this.activeRegion.enemyTemplates;
@@ -18872,6 +18872,76 @@ class yT {
             stateTimer: 2
         })
     }
+    applyServerEnemyEvent(kind, payload) {
+        if (kind === "snapshot") {
+            const list = (payload || []).map(e => this.hydrateServerEnemy(e));
+            this._serverEnemies = list, this.enemies = list;
+            return
+        }
+        if (kind === "batch") {
+            (payload || []).forEach(e => {
+                const cur = this.enemies.find(x => x.id === e.id);
+                if (cur) cur.sx = e.x, cur.sy = e.y, cur.hp = e.hp, cur.maxHp = e.maxHp, cur.state = e.st, cur.isAttacking = !!e.atk;
+                else this.enemies.push(this.hydrateServerEnemy(e))
+            });
+            this._serverEnemies = this.enemies;
+            return
+        }
+        if (kind === "damage" && payload) {
+            const cur = this.enemies.find(x => x.id === payload.id);
+            cur && (cur.hp = payload.hp, cur.maxHp = payload.maxHp || cur.maxHp, this.addFloatingText(payload.x || cur.x, (payload.y || cur.y) - 24, "-" + payload.dmg, "#ffffff", 14));
+            return
+        }
+        if (kind === "death" && payload) {
+            const cur = this.enemies.find(x => x.id === payload.id);
+            cur && this.addFloatingText(cur.x, cur.y - 20, "Derrotado", "#f87171", 13);
+            this.enemies = this.enemies.filter(x => x.id !== payload.id);
+            this._serverEnemies = this.enemies;
+            payload.tid && this.onQuestProgress && this.onQuestProgress(payload.tid, 1, 1);
+            return
+        }
+        if (kind === "reward" && payload) {
+            payload.gold && (this.player.gold += payload.gold, this.addFloatingText(this.player.x, this.player.y - 20, "+" + payload.gold + " Oro", "#eab308", 14));
+            payload.exp && this.addExp(payload.exp);
+            return
+        }
+        if (kind === "attack" && payload) {
+            this.addFloatingText(this.player.x, this.player.y - 25, "-" + (payload.dmg || 0), "#ef4444", 15);
+            payload.hp != null && (this.player.hp = payload.hp);
+            payload.maxHp != null && (this.player.maxHp = payload.maxHp);
+            qe.playHitSound();
+            this.player.hp <= 0 && this.handlePlayerDeath();
+        }
+    }
+    hydrateServerEnemy(e) {
+        const tpl = (typeof Vr !== "undefined" && Vr[e.tid]) || {};
+        return {
+            id: e.id,
+            templateId: e.tid,
+            name: e.name || tpl.name || "Enemigo",
+            level: tpl.level || 1,
+            x: e.x,
+            y: e.y,
+            sx: e.x,
+            sy: e.y,
+            vx: 0,
+            vy: 0,
+            hp: e.hp,
+            maxHp: e.maxHp || e.hp || 1,
+            damage: tpl.damage || 8,
+            defense: tpl.defense || 1,
+            size: e.size || tpl.size || 22,
+            color: e.color || tpl.color || "#ef4444",
+            isBoss: !!e.boss || !!tpl.isBoss,
+            state: e.st || "patrol",
+            spriteType: tpl.spriteType || "beast",
+            aggroRange: tpl.aggroRange || 200,
+            attackRange: tpl.attackRange || 40,
+            attackCooldown: tpl.attackCooldown || 1.2,
+            lastAttackTime: 0,
+            speed: tpl.speed || 80
+        }
+    }
     handlePlayerBasicAttack() {
         if (this.player.isAttacking) return;
         const oe = this.getDerived();
@@ -18991,6 +19061,12 @@ class yT {
         }
     }
     damageEnemy(r, c, g) {
+        if (bu.connected) {
+            bu.sendAttackEnemy && bu.sendAttackEnemy(r.id);
+            qe.playHitSound(!1);
+            this.addFloatingText(r.x, r.y - (r.size || 20) - 10, "!", "#fbbf24", 14);
+            return
+        }
         const De = this.getDerived(),
             T = De.critChance,
             m = De.critDamage,
@@ -19200,6 +19276,13 @@ class yT {
         const Q = this.player.x,
             xe = this.player.y;
         if (this.camera.x += (Q - this.camera.x) * 6 * r, this.camera.y += (xe - this.camera.y) * 6 * r, this.enemies.forEach(E => {
+                if (bu.connected) {
+                    if (E.sx != null) {
+                        E.x += (E.sx - E.x) * Math.min(1, 10 * r);
+                        E.y += (E.sy - E.y) * Math.min(1, 10 * r)
+                    }
+                    return
+                }
                 const w = Math.hypot(this.player.x - E.x, this.player.y - E.y);
                 if (E.behavior !== "passive" && (w < E.aggroRange ? E.state = "chase" : w > E.aggroRange * 1.5 && E.state === "chase" && (E.state = "patrol")), E.state === "chase") {
                     const G = Math.atan2(this.player.y - E.y, this.player.x - E.x);
@@ -19453,7 +19536,7 @@ const bT = ["Aleron_Shadowblade", "Lyra_Moonwhisper", "Kaelen_Ironheart", "Vespe
     qN = ["¡Buen golpe, camarada!", "¿Alguien para la Cripta de Valerius?", "¡Los lobos del bosque dan buena experiencia!", "Acabo de conseguir un botín épico en el cofre.", "Cuidado con Skorpios en el desierto, tiene veneno letal.", "¡Eldoria renacerá!", "Me quedan pocas pociones, voy a ver a Mirabel.", "¡Llegó un nuevo guerrero a Oakhaven!", "Las armas de Vargas valen cada moneda de oro.", "¡Hacia el Nexo de Ruina!"];
 class vT {
     constructor() {
-        this.channel = null, this.socket = null, this.connected = !1, this.allowReconnect = !0, this.localPlayerId = "", this.remotePlayers = new Map, this.simulatedCompanions = [], this.onChatCallbacks = [], this.onPlayerUpdateCallbacks = [], this.onAuthority = null, this.chatTimer = 0, this.lastHello = null, this.useBots = !0, this._helloSent = !1, this.rtt = 0, this._seq = 0, this._lastSentAt = 0, this._lastSentKey = "", this._pingTimer = 0;
+        this.channel = null, this.socket = null, this.connected = !1, this.allowReconnect = !0, this.localPlayerId = "", this.remotePlayers = new Map, this.simulatedCompanions = [], this.onChatCallbacks = [], this.onPlayerUpdateCallbacks = [], this.onAuthority = null, this.onEnemies = null, this.chatTimer = 0, this.lastHello = null, this.useBots = !0, this._helloSent = !1, this.rtt = 0, this._seq = 0, this._lastSentAt = 0, this._lastSentKey = "", this._pingTimer = 0;
         try {
             typeof window < "u" && "BroadcastChannel" in window && (this.channel = new BroadcastChannel("eldoria_mmorpg_network"), this.channel.onmessage = r => {
                 this.connected || this.handleNetworkMessage(r.data)
@@ -19586,6 +19669,14 @@ class vT {
             }
         })
     }
+    sendAttackEnemy(r) {
+        this.connected && r && this.sendRaw({
+            type: "ATTACK_ENEMY",
+            payload: {
+                enemyId: r
+            }
+        })
+    }
     upsertRemote(c) {
         if (!c || !c.id || c.id === this.localPlayerId) return;
         const prev = this.remotePlayers.get(c.id);
@@ -19595,7 +19686,7 @@ class vT {
         if (!r || !r.type) return;
         if (r.type === "WELCOME") {
             const c = r.payload || {};
-            this.remotePlayers.clear(), (c.players || []).forEach(g => this.upsertRemote(g)), this.onAuthority && c.you && this.onAuthority(c.you, c.saved || null)
+            this.remotePlayers.clear(), (c.players || []).forEach(g => this.upsertRemote(g)), this.onAuthority && c.you && this.onAuthority(c.you, c.saved || null), this.onEnemies && c.enemies && this.onEnemies("snapshot", c.enemies)
         } else if (r.type === "PLAYER_STATE" || r.type === "PLAYER_JOIN") {
             const c = r.payload;
             if (c && c.id && c.id === this.localPlayerId) this.onAuthority && this.onAuthority({
@@ -19640,7 +19731,13 @@ class vT {
         else if (r.type === "PONG") {
             const sent = r.payload && r.payload.clientTime;
             sent && (this.rtt = Math.max(0, Date.now() - sent))
-        }
+        } else if (r.type === "WELCOME" && r.payload && r.payload.enemies) this.onEnemies && this.onEnemies("snapshot", r.payload.enemies);
+        else if (r.type === "ENEMY_SNAPSHOT") this.onEnemies && this.onEnemies("snapshot", (r.payload && r.payload.enemies) || []);
+        else if (r.type === "ENEMY_BATCH") this.onEnemies && this.onEnemies("batch", (r.payload && r.payload.enemies) || []);
+        else if (r.type === "ENEMY_DAMAGE") this.onEnemies && this.onEnemies("damage", r.payload);
+        else if (r.type === "ENEMY_DEATH") this.onEnemies && this.onEnemies("death", r.payload);
+        else if (r.type === "ENEMY_REWARD") this.onEnemies && this.onEnemies("reward", r.payload);
+        else if (r.type === "ENEMY_ATTACK") this.onEnemies && this.onEnemies("attack", r.payload);
     }
     update(r, c, g) {
         this.remotePlayers.forEach(m => {
@@ -23637,6 +23734,9 @@ function uD() {
                     maxHp: nm
                 })
             })
+        };
+        bu.onEnemies = (kind, payload) => {
+            r.current && r.current.applyServerEnemyEvent && r.current.applyServerEnemyEvent(kind, payload)
         };
         const ie = () => {
             O.current && r.current && r.current.resize(window.innerWidth, window.innerHeight)

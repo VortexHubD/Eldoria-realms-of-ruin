@@ -19536,7 +19536,7 @@ const bT = ["Aleron_Shadowblade", "Lyra_Moonwhisper", "Kaelen_Ironheart", "Vespe
     qN = ["¡Buen golpe, camarada!", "¿Alguien para la Cripta de Valerius?", "¡Los lobos del bosque dan buena experiencia!", "Acabo de conseguir un botín épico en el cofre.", "Cuidado con Skorpios en el desierto, tiene veneno letal.", "¡Eldoria renacerá!", "Me quedan pocas pociones, voy a ver a Mirabel.", "¡Llegó un nuevo guerrero a Oakhaven!", "Las armas de Vargas valen cada moneda de oro.", "¡Hacia el Nexo de Ruina!"];
 class vT {
     constructor() {
-        this.channel = null, this.socket = null, this.connected = !1, this.allowReconnect = !0, this.localPlayerId = "", this.remotePlayers = new Map, this.simulatedCompanions = [], this.onChatCallbacks = [], this.onPlayerUpdateCallbacks = [], this.onAuthority = null, this.onEnemies = null, this.chatTimer = 0, this.lastHello = null, this.useBots = !0, this._helloSent = !1, this.rtt = 0, this._seq = 0, this._lastSentAt = 0, this._lastSentKey = "", this._pingTimer = 0;
+        this.channel = null, this.socket = null, this.connected = !1, this.allowReconnect = !0, this.localPlayerId = "", this.remotePlayers = new Map, this.simulatedCompanions = [], this.onChatCallbacks = [], this.onPlayerUpdateCallbacks = [], this.onAuthority = null, this.onEnemies = null, this.seenChatIds = new Set, this.chatTimer = 0, this.lastHello = null, this.useBots = !0, this._helloSent = !1, this.rtt = 0, this._seq = 0, this._lastSentAt = 0, this._lastSentKey = "", this._pingTimer = 0;
         try {
             typeof window < "u" && "BroadcastChannel" in window && (this.channel = new BroadcastChannel("eldoria_mmorpg_network"), this.channel.onmessage = r => {
                 this.connected || this.handleNetworkMessage(r.data)
@@ -19558,7 +19558,7 @@ class vT {
                 this.connected = !0, this.useBots = !1, this._helloSent = !1, this.startPing(), this.lastHello && this.sendRaw({
                     type: "HELLO",
                     payload: this.lastHello
-                }), this._helloSent = !!this.lastHello, this.triggerChat({
+                }), this._helloSent = !!this.lastHello, this.requestChatSync(), this.triggerChat({
                     id: "sys_net_ok",
                     sender: "Sistema",
                     text: "Conectado al servidor. Los jugadores reales de tu región aparecerán aquí.",
@@ -19644,11 +19644,18 @@ class vT {
             }
         })
     }
+    requestChatSync() {
+        this.connected && this.sendRaw({
+            type: "CHAT_SYNC",
+            payload: {}
+        })
+    }
     sendChatMessage(r) {
+        const text = r && (r.text != null ? r.text : r);
         if (this.connected) this.sendRaw({
             type: "CHAT_MESSAGE",
             payload: {
-                text: r && r.text
+                text: text
             }
         });
         else {
@@ -19686,7 +19693,7 @@ class vT {
         if (!r || !r.type) return;
         if (r.type === "WELCOME") {
             const c = r.payload || {};
-            this.remotePlayers.clear(), (c.players || []).forEach(g => this.upsertRemote(g)), this.onAuthority && c.you && this.onAuthority(c.you, c.saved || null), this.onEnemies && c.enemies && this.onEnemies("snapshot", c.enemies)
+            this.remotePlayers.clear(), (c.players || []).forEach(g => this.upsertRemote(g)), this.onAuthority && c.you && this.onAuthority(c.you, c.saved || null), this.onEnemies && c.enemies && this.onEnemies("snapshot", c.enemies), this.applyChatHistory(c.chat || [])
         } else if (r.type === "PLAYER_STATE" || r.type === "PLAYER_JOIN") {
             const c = r.payload;
             if (c && c.id && c.id === this.localPlayerId) this.onAuthority && this.onAuthority({
@@ -19702,6 +19709,7 @@ class vT {
         }
         else if (r.type === "PLAYER_LEAVE") r.payload && r.payload.id && this.remotePlayers.delete(r.payload.id), this.notifyPlayerUpdate();
         else if (r.type === "CHAT_MESSAGE") this.triggerChat(r.payload);
+        else if (r.type === "CHAT_HISTORY") this.applyChatHistory((r.payload && r.payload.messages) || []);
         else if (r.type === "STATE_CORRECTION") this.onAuthority && r.payload && this.onAuthority(r.payload, null);
         else if (r.type === "SESSION_REPLACED") this.allowReconnect = !1, this.triggerChat({
             id: "sys_session",
@@ -19745,6 +19753,7 @@ class vT {
                 m.x += (m.tx - m.x) * Math.min(1, 12 * r);
                 m.y += (m.ty - m.y) * Math.min(1, 12 * r)
             }
+            m.chatBubble && (m.chatBubble.timer -= r, m.chatBubble.timer <= 0 && (m.chatBubble = void 0))
         });
         const T = Array.from(this.remotePlayers.values()).filter(m => m.regionId === c && (m.dungeonId || null) === (g || null));
         return this.connected || !this.useBots ? T : T.concat(this.simulatedCompanions.filter(m => m.regionId === c && m.dungeonId === g))
@@ -19759,8 +19768,33 @@ class vT {
             this.onPlayerUpdateCallbacks = this.onPlayerUpdateCallbacks.filter(c => c !== r)
         }
     }
+    applyChatHistory(list) {
+        (list || []).forEach(c => this.triggerChat(c))
+    }
+    attachChatBubble(r) {
+        if (!r || !r.text || r.channel === "system") return;
+        const id = r.senderId;
+        if (id && id !== this.localPlayerId) {
+            const rp = this.remotePlayers.get(id);
+            rp && (rp.chatBubble = {
+                text: String(r.text).slice(0, 48),
+                timer: 4
+            })
+        }
+    }
     triggerChat(r) {
-        r && this.onChatCallbacks.forEach(c => c(r))
+        if (!r) return;
+        const id = r.id || ("chat_" + (r.timestamp || Date.now()) + "_" + (r.sender || "") + "_" + (r.text || ""));
+        r.id = id;
+        this.seenChatIds = this.seenChatIds || new Set;
+        if (this.seenChatIds.has(id)) return;
+        this.seenChatIds.add(id);
+        if (this.seenChatIds.size > 250) {
+            const keep = Array.from(this.seenChatIds).slice(-120);
+            this.seenChatIds = new Set(keep)
+        }
+        this.attachChatBubble(r);
+        this.onChatCallbacks.forEach(c => c(r))
     }
     notifyPlayerUpdate() {
         const r = Array.from(this.remotePlayers.values());
@@ -23720,7 +23754,8 @@ function uD() {
             if (you.regionId && you.regionId !== pl.activeRegionId && you.x != null) {
                 pl.activeRegionId = you.regionId, pl.isInDungeon = !!you.dungeonId, pl.activeDungeonId = you.dungeonId || null, pl.x = you.x, pl.y = you.y;
                 r.current.activeRegion = To[you.regionId] || r.current.activeRegion;
-                r.current.loadCurrentWorldEntities && r.current.loadCurrentWorldEntities()
+                r.current.loadCurrentWorldEntities && r.current.loadCurrentWorldEntities();
+                bu.requestChatSync && bu.requestChatSync()
             }
             you.hp != null && (pl.hp = you.hp);
             you.maxHp != null && (pl.maxHp = you.maxHp);

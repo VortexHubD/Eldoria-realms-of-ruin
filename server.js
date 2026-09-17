@@ -18,6 +18,7 @@ const RATE_LIMIT_WINDOW_MS = 1000;
 const RATE_LIMIT_MAX_MESSAGES = 50;
 const CHAT_LIMIT_WINDOW_MS = 4000;
 const CHAT_LIMIT_MAX = 4;
+const CHAT_HISTORY_MAX = 50;
 const HEARTBEAT_INTERVAL_MS = 15000;
 const HEARTBEAT_TIMEOUT_MS = 45000;
 const SAVE_WRITE_DEBOUNCE_MS = 3000;
@@ -144,6 +145,58 @@ function persistFromPlayer(player) {
 function sameInstance(a, b) {
   if (!a || !b) return false;
   return a.regionId === b.regionId && (a.dungeonId || null) === (b.dungeonId || null);
+}
+
+
+const chatHistory = new Map();
+
+function chatInstanceKey(regionId, dungeonId) {
+  return validRegion(regionId || "region_village") + "|" + (dungeonId || "");
+}
+
+function rememberChat(msg) {
+  const key = chatInstanceKey(msg.regionId, msg.dungeonId);
+  const list = chatHistory.get(key) || [];
+  if (msg.id && list.some((m) => m.id === msg.id)) return;
+  list.push(msg);
+  if (list.length > CHAT_HISTORY_MAX) list.splice(0, list.length - CHAT_HISTORY_MAX);
+  chatHistory.set(key, list);
+}
+
+function historyFor(player) {
+  if (!player) return [];
+  return (chatHistory.get(chatInstanceKey(player.regionId, player.dungeonId)) || []).slice();
+}
+
+function sendChatHistory(client) {
+  if (!client || !client.player) return;
+  send(client, {
+    type: "CHAT_HISTORY",
+    payload: {
+      regionId: client.player.regionId,
+      dungeonId: client.player.dungeonId || null,
+      messages: historyFor(client.player)
+    }
+  });
+}
+
+function publishChat(player, text, channel) {
+  const isSys = channel === "system";
+  const chat = {
+    id: "msg_" + Date.now() + "_" + crypto.randomBytes(4).toString("hex"),
+    senderId: isSys ? null : (player.id || null),
+    sender: isSys ? "Sistema" : sanitizeName(player.name),
+    text: sanitizeChat(text),
+    channel: channel || "region",
+    regionId: player.regionId || "region_village",
+    dungeonId: player.dungeonId || null,
+    timestamp: Date.now()
+  };
+  if (!chat.text && channel !== "system") return null;
+  if (channel === "system" && !chat.text) return null;
+  rememberChat(chat);
+  regionBroadcast({ type: "CHAT_MESSAGE", payload: chat }, player);
+  return chat;
 }
 
 function send(client, msg) {
@@ -382,14 +435,13 @@ function handleMessage(clientId, raw) {
         you: Object.assign(publicState(player), { gold: player.gold, exp: player.exp, mana: player.mana, maxMana: player.maxMana }),
         players: onlineInInstance(player).filter((p) => p.id !== id),
         saved: saves[id] || null,
-        enemies: snapshotEnemies(player.regionId, player.dungeonId)
+        enemies: snapshotEnemies(player.regionId, player.dungeonId),
+        chat: historyFor(player)
       }
     });
     regionBroadcast({ type: "PLAYER_JOIN", payload: publicState(player) }, player, clientId);
-    regionBroadcast({
-      type: "CHAT_MESSAGE",
-      payload: { id: "sys_" + Date.now(), sender: "Sistema", text: player.name + " ha llegado.", channel: "system", timestamp: Date.now() }
-    }, player);
+    publishChat(player, player.name + " ha llegado.", "system");
+    sendChatHistory(client);
     return;
   }
 
@@ -405,6 +457,7 @@ function handleMessage(clientId, raw) {
       regionBroadcast({ type: "PLAYER_LEAVE", payload: { id: moved.id } }, { regionId: prevRegion, dungeonId: prevDungeon }, clientId);
       regionBroadcast({ type: "PLAYER_JOIN", payload: publicState(moved) }, moved, clientId);
       sendEnemySnapshot(client);
+      sendChatHistory(client);
     } else {
       regionBroadcast({ type: "PLAYER_STATE", payload: Object.assign(publicState(moved), { t: Date.now() }) }, moved, clientId);
     }
@@ -415,16 +468,12 @@ function handleMessage(clientId, raw) {
     if (!checkChatLimit(client)) return;
     const chatText = sanitizeChat(msg.payload && msg.payload.text);
     if (!chatText) return;
-    regionBroadcast({
-      type: "CHAT_MESSAGE",
-      payload: {
-        id: "msg_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
-        sender: client.player.name,
-        text: chatText,
-        channel: "region",
-        timestamp: Date.now()
-      }
-    }, client.player);
+    publishChat(client.player, chatText, "region");
+    return;
+  }
+
+  if (msg.type === "CHAT_SYNC") {
+    sendChatHistory(client);
     return;
   }
 

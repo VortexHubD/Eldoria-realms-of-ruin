@@ -1,0 +1,12 @@
+{
+  "name": "eldoria-realms-of-ruin",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Eldoria: Realms of Ruin - 2D MMORPG web server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test_authority.mjs && node test_hello_saves.mjs && node test_region_broadcast.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

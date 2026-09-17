@@ -1,0 +1,11 @@
+node_modules
+server-saves.json
+server-saves.json.tmp
+.git
+.gitignore
+*.log
+README_DEPLOY.md
+LEEME_INSTRUCCIONES.txt
+iniciar_juego.bat
+iniciar_juego.py
+test_*.mjs

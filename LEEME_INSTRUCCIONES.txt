@@ -1,0 +1,29 @@
+=======================================================
+     ELDORIA: REALMS OF RUIN - VERSION CORREGIDA
+=======================================================
+
+COMO JUGAR EN TU PC:
+1. Instala Node.js (recomendado para multijugador).
+2. Doble clic en iniciar_juego.py o iniciar_juego.bat
+   o escribe: node server.js
+3. Abre http://localhost:8080
+
+COMO JUGAR CON AMIGOS EN LA MISMA RED:
+1. Una persona inicia el servidor (node server.js).
+2. Esa persona mira en la consola su IP, por ejemplo:
+   http://192.168.1.20:8080
+3. Los amigos abren ESA direccion en el navegador.
+4. Cada uno crea su heroe. Si estan en la misma region
+   se veran caminar y podran hablar por el chat (Enter).
+
+El servidor guarda una copia en server-saves.json
+y evita subidas imposibles de oro o nivel.
+
+CONTROLES:
+- Moverse: W A S D o flechas
+- Atacar: Clic, Espacio o mantener pulsado
+- Interactuar: E
+- Habilidades: 1 2 3 4
+- Pociones: Q o 5 (vida), R o 6 (mana)
+- Personaje: C | Inventario: I | Misiones: J | Mapa: M
+=======================================================
